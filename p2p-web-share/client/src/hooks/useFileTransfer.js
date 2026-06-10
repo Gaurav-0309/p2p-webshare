@@ -13,8 +13,27 @@ export function useFileTransfer() {
     const targetFile = fileToSend || store.file
 
     if (!targetFile) { store.setError('No file selected'); return }
-    if (!dataChannel || dataChannel.readyState !== 'open') {
-      store.setError('Data channel is not open'); return
+    if (!dataChannel) {
+      store.setError('Data channel does not exist'); return
+    }
+
+    // Wait for data channel to be open
+    if (dataChannel.readyState !== 'open') {
+      console.log('[Transfer] Waiting for data channel to be open...')
+      await new Promise((resolve) => {
+        const checkOpen = () => {
+          if (dataChannel.readyState === 'open') {
+            dataChannel.removeEventListener('open', checkOpen)
+            resolve()
+          }
+        }
+        dataChannel.addEventListener('open', checkOpen)
+        // Fallback timeout
+        setTimeout(() => {
+          dataChannel.removeEventListener('open', checkOpen)
+          if (dataChannel.readyState === 'open') resolve()
+        }, 500)
+      })
     }
 
     const { encryptionKey, encryptionEnabled } = store
@@ -24,15 +43,21 @@ export function useFileTransfer() {
     store.startTransfer(totalChunks)
     console.log(`[Transfer] Sending "${targetFile.name}" — ${totalChunks} chunks, encrypted: ${encryptionEnabled}, resuming from: ${startChunk}`)
 
-    dataChannel.send(JSON.stringify({
-      type: 'metadata',
-      name: targetFile.name,
-      size: targetFile.size,
-      mimeType: targetFile.type,
-      totalChunks,
-      encrypted: encryptionEnabled,
-      resumeFrom: startChunk,
-    }))
+    try {
+      dataChannel.send(JSON.stringify({
+        type: 'metadata',
+        name: targetFile.name,
+        size: targetFile.size,
+        mimeType: targetFile.type,
+        totalChunks,
+        encrypted: encryptionEnabled,
+        resumeFrom: startChunk,
+      }))
+    } catch (err) {
+      console.error('[Transfer] Error sending metadata:', err)
+      store.setError('Failed to send file metadata')
+      return
+    }
 
     let bytesSent = startChunk > 0 ? Math.min(startChunk * 256 * 1024, targetFile.size) : 0
 
@@ -44,29 +69,35 @@ export function useFileTransfer() {
 
       let chunkData = await readChunk(targetFile, i)
 
-      if (encryptionEnabled && encryptionKey) {
-        const { iv, ciphertext } = await encryptChunk(chunkData, encryptionKey)
-        const hash = await hashChunk(chunkData)
-        const packed = packEncryptedChunk(iv, ciphertext)
+      try {
+        if (encryptionEnabled && encryptionKey) {
+          const { iv, ciphertext } = await encryptChunk(chunkData, encryptionKey)
+          const hash = await hashChunk(chunkData)
+          const packed = packEncryptedChunk(iv, ciphertext)
 
-        dataChannel.send(JSON.stringify({
-          type: 'chunk-header',
-          index: i,
-          hash,
-          size: packed.byteLength,
-          encrypted: true,
-        }))
-        dataChannel.send(packed)
-      } else {
-        const hash = await hashChunk(chunkData)
-        dataChannel.send(JSON.stringify({
-          type: 'chunk-header',
-          index: i,
-          hash,
-          size: chunkData.byteLength,
-          encrypted: false,
-        }))
-        dataChannel.send(chunkData)
+          dataChannel.send(JSON.stringify({
+            type: 'chunk-header',
+            index: i,
+            hash,
+            size: packed.byteLength,
+            encrypted: true,
+          }))
+          dataChannel.send(packed)
+        } else {
+          const hash = await hashChunk(chunkData)
+          dataChannel.send(JSON.stringify({
+            type: 'chunk-header',
+            index: i,
+            hash,
+            size: chunkData.byteLength,
+            encrypted: false,
+          }))
+          dataChannel.send(chunkData)
+        }
+      } catch (err) {
+        console.error(`[Transfer] Error sending chunk ${i}:`, err)
+        useTransferStore.getState().setError(`Failed to send chunk ${i}`)
+        return
       }
 
       bytesSent += chunkData.byteLength
@@ -74,7 +105,11 @@ export function useFileTransfer() {
       await waitForBufferDrain(dataChannel)
     }
 
-    dataChannel.send(JSON.stringify({ type: 'transfer-complete' }))
+    try {
+      dataChannel.send(JSON.stringify({ type: 'transfer-complete' }))
+    } catch (err) {
+      console.error('[Transfer] Error sending transfer-complete:', err)
+    }
     useTransferStore.getState().setTransferComplete()
     console.log('[Transfer] All chunks sent ✓')
   }, [])
