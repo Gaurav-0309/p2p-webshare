@@ -43,18 +43,30 @@ export default function Room() {
   useEffect(() => {
     if (hasJoinedRef.current) return
     hasJoinedRef.current = true
-    if (!socket.connected) socket.connect()
+    
+    const setupRoom = async () => {
+      // Ensure socket is connected
+      if (!socket.connected) {
+        await new Promise((resolve) => {
+          socket.once('connect', resolve)
+          socket.connect()
+        })
+      }
 
-    const currentRole = useTransferStore.getState().role
-    if (!currentRole) {
-      setRoom(roomId, 'receiver')
-      socket.emit('join-room', { roomId }, (response) => {
-        if (response?.error) console.error('[Room] Join failed:', response.error)
-        else console.log('[Room] Joined as receiver ✓')
-      })
-    } else {
-      console.log('[Room] Entered as:', currentRole)
+      const currentRole = useTransferStore.getState().role
+      if (!currentRole) {
+        // Receiver joining for the first time
+        setRoom(roomId, 'receiver')
+        socket.emit('join-room', { roomId }, (response) => {
+          if (response?.error) console.error('[Room] Join failed:', response.error)
+          else console.log('[Room] Joined as receiver ✓')
+        })
+      } else {
+        console.log('[Room] Entered as:', currentRole)
+      }
     }
+
+    setupRoom()
   }, [roomId, socket, setRoom])
 
   const isSender = role === 'sender'
