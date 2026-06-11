@@ -8,6 +8,7 @@ import FileCard from '../components/FileCard'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { useFileTransfer } from '../hooks/useFileTransfer'
 import { getSocket } from '../hooks/useSocket'
+import { importKeyFromString } from '../utils/crypto'
 import useTransferStore from '../store/transferStore'
 
 export default function Room() {
@@ -45,6 +46,27 @@ export default function Room() {
     hasJoinedRef.current = true
     
     const setupRoom = async () => {
+      // Extract encryption key from URL hash if present
+      const hash = window.location.hash.slice(1)
+      let hasEncryptionKey = false
+      
+      if (hash.startsWith('key=')) {
+        const keyStr = hash.slice(4)
+        try {
+          const key = await importKeyFromString(keyStr)
+          useTransferStore.getState().setEncryption(key, true)
+          hasEncryptionKey = true
+          console.log('[Room] Encryption key loaded from URL ✓')
+        } catch (err) {
+          console.error('[Room] Failed to import encryption key:', err)
+        }
+      }
+      
+      // If no encryption key in URL, disable encryption entirely
+      if (!hasEncryptionKey) {
+        useTransferStore.getState().setEncryption(null, false)
+      }
+
       // Ensure socket is connected
       if (!socket.connected) {
         await new Promise((resolve) => {

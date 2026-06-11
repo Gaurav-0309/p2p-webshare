@@ -2,10 +2,11 @@
  * Home.jsx — Landing page
  * Users drop a file here to create a room and get a shareable link.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Shield, Zap, Globe } from 'lucide-react'
 import DropZone from '../components/DropZone'
+import JoinRoomModal from '../components/JoinRoomModal'
 import { useRoom } from '../hooks/useRoom'
 import useTransferStore from '../store/transferStore'
 import { getSocket } from '../hooks/useSocket'
@@ -20,6 +21,7 @@ export default function Home() {
   const navigate = useNavigate()
   const { file, reset } = useTransferStore()
   const socket = getSocket()
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false)
 
   // Reset state when landing on home
   useEffect(() => {
@@ -42,6 +44,11 @@ export default function Home() {
       useTransferStore.getState().setRoom(roomId, 'sender')
       navigate(`/room/${roomId}`)
     })
+  }
+
+  const handleJoinRoom = (roomId) => {
+    setIsJoinModalOpen(false)
+    navigate(`/room/${roomId}`)
   }
 
   return (
@@ -119,10 +126,7 @@ export default function Home() {
               Or{' '}
               <button
                 className="text-muted hover:text-accent transition-colors underline underline-offset-2"
-                onClick={() => {
-                  const id = prompt('Enter Room ID to join:')
-                  if (id?.trim()) navigate(`/room/${id.trim()}`)
-                }}
+                onClick={() => setIsJoinModalOpen(true)}
               >
                 join a room with an ID
               </button>
@@ -145,6 +149,13 @@ export default function Home() {
           ))}
         </div>
       </main>
+
+      {/* Join Room Modal */}
+      <JoinRoomModal
+        isOpen={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+        onJoin={handleJoinRoom}
+      />
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-border">
